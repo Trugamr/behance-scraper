@@ -1,11 +1,13 @@
 /** @type {import('@remix-run/dev').AppConfig} */
 module.exports = {
   ignoredRouteFiles: ['**/.*'],
-  // appDirectory: "app",
-  // assetsBuildDirectory: "public/build",
-  // serverBuildPath: "build/index.js",
-  // publicPath: "/build/",
+  serverDependenciesToBundle: [
+    'filenamify',
+    'trim-repeated',
+    'filename-reserved-regex',
+    'strip-outer',
+  ],
   future: {
-    unstable_tailwind: true
-  }
+    unstable_tailwind: true,
+  },
 }
