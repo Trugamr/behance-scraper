@@ -1,9 +1,9 @@
 import type { LoaderArgs } from '@remix-run/node'
 import { json } from '@remix-run/node'
-import { chromium } from 'playwright'
+import { load } from 'cheerio'
 import invariant from 'tiny-invariant'
-import fs from 'node:fs/promises'
 import path from 'node:path'
+import fs from 'node:fs/promises'
 import filenamify from 'filenamify'
 
 export async function loader({ params }: LoaderArgs) {
@@ -11,81 +11,44 @@ export async function loader({ params }: LoaderArgs) {
 
   const url = new URL(`https://behance.net/gallery/${params.project}/_`)
 
-  const browser = await chromium.launch({
-    headless: false,
-  })
+  const response = await fetch(url)
+  const markup = await response.text()
+
+  const $ = load(markup)
+
+  const title = $('[class^="Project-title-"]').text()
+  const owner = $('[class^="Project-ownerName-"]').text()
+
+  const images = $('#project-modules img')
+    .map((index, image) => {
+      return $(image).attr('src')
+    })
+    .get()
+
+  const directory = path.resolve(
+    'downloads',
+    filenamify(owner),
+    filenamify(title),
+  )
 
   try {
-    const page = await browser.newPage()
-    await page.goto(url.href, {
-      waitUntil: 'networkidle',
-    })
-
-    const title = await page.$eval('[class^="Project-title-"]', title => {
-      return title.textContent
-    })
-    invariant(title, 'Project title invalid')
-
-    const owner = await page.$eval('[class^="Project-ownerName-"]', owner => {
-      return owner.textContent
-    })
-    invariant(owner, 'Project owner details not found')
-
-    // TODO: Capture video files
-    const images = await page.$$eval('#project-modules img', images => {
-      return images.map(image => {
-        if (image instanceof HTMLImageElement) {
-          return image.src
-        }
-        throw new Error('Element is not a valid image element')
-      })
-    })
-
-    for (const image of images) {
-      const response = await fetch(image)
-      const arrayBuffer = await response.arrayBuffer()
-      const buffer = Buffer.from(arrayBuffer)
-
-      const url = new URL(image)
-
-      let filename = url.pathname.split('/').pop()
-      if (filename) {
-        filename = filenamify(filename)
-      }
-      if (!filename) {
-        throw new Error('File name not found in image pathname')
-      }
-
-      const extension = path.extname(filename)
-      if (!extension) {
-        throw new Error('Failed to get image extension')
-      }
-
-      const directory = path.resolve(
-        'downloads',
-        filenamify(owner),
-        filenamify(title),
-      )
-      try {
-        await fs.stat(directory)
-      } catch (error) {
-        await fs.mkdir(directory, { recursive: true })
-      }
-
-      await fs.writeFile(path.join(directory, filename), buffer)
-    }
-
-    const project = {
-      id: params.project,
-      title,
-      owner,
-      images,
-    }
-
-    return json(project)
+    await fs.stat(directory)
   } catch (error) {
-    return json({ error }, { status: 500 })
-  } finally {
-    await browser.close()
+    await fs.mkdir(directory, { recursive: true })
   }
+
+  for (const image of images) {
+    const url = new URL(image)
+
+    const filename = url.pathname.split('/').pop()
+    invariant(filename, 'Filename not found in url')
+
+    const response = await fetch(url)
+    const arrayBuffer = await response.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+
+    await fs.writeFile(path.join(directory, filename), buffer)
+  }
+
+  return json({ url, title, owner, images })
 }
